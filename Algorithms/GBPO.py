@@ -119,7 +119,7 @@ def random_acquisition_global(
     alpha,
     length_scale,
     xi,
-    kernel_type='Matern',
+    kernel_type='RBF',
     nu=2.5
 ):
     """
@@ -158,26 +158,50 @@ def random_acquisition_global(
 # -------------------------------
 # 6. Simple Random Search
 # -------------------------------
-def Random_search(f, n_dim, bounds_rs, n_samples):
+
+def Random_search(f, n_p, bounds_rs, iter_rs):
     """
-    Randomly sample 'n_samples' points in 'bounds_rs'.
-    Returns best solution + all sampled points.
+    This function is a naive optimization routine that randomly samples the
+    allowed space and returns the best value & best point.
+
+    Parameters
+    ----------
+    f         : an object or function that has 'fun_test(x)' returning f(x).
+    n_p       : int, dimension of the input space.
+    bounds_rs : array shape (n_p, 2), [lower_bound, upper_bound] for each dimension.
+    iter_rs   : int, number of random points to create.
+
+    Returns
+    -------
+    f_b    : float
+        The minimum function value found among the samples.
+    x_b    : array of shape (n_p,)
+        The point that yielded the best value.
+    localx : array of shape (iter_rs, n_p)
+        All sampled points.
+    localval : array of shape (iter_rs,)
+        Function values at the sampled points.
     """
-    X_sampled = np.zeros((n_samples, n_dim))
-    Y_vals = np.zeros(n_samples)
+    # arrays to store sampled points & function values
+    localx   = np.zeros((iter_rs, n_p))  
+    localval = np.zeros(iter_rs)
 
-    dom_range = bounds_rs[:, 1] - bounds_rs[:, 0]
-    dom_bias  = bounds_rs[:, 0]
+    # bounds
+    bounds_range = bounds_rs[:,1] - bounds_rs[:,0]
+    bounds_bias  = bounds_rs[:,0]
 
-    for i in range(n_samples):
-        x_rand = np.random.rand(n_dim)*dom_range + dom_bias
-        X_sampled[i] = x_rand
-        Y_vals[i] = f.fun_test(x_rand)
+    for sample_i in range(iter_rs):
+        # uniform sample in [lower_bound, upper_bound] for each dimension
+        x_trial = np.random.uniform(0, 1, n_p) * bounds_range + bounds_bias
+        localx[sample_i, :] = x_trial
+        localval[sample_i]  = f.fun_test(x_trial)
 
-    idx_min = np.argmin(Y_vals)
-    x_best  = X_sampled[idx_min]
-    f_best  = Y_vals[idx_min]
-    return x_best, f_best, X_sampled, Y_vals
+    # choosing the best among the sampled points
+    minindex = np.argmin(localval)
+    f_b      = localval[minindex]
+    x_b      = localx[minindex, :]
+
+    return f_b, x_b, localx, localval
 
 # -------------------------------
 # 7. GP + Global Random Acquisition Optimizer
@@ -191,7 +215,7 @@ def gp_random_optimizer(
     length_scale=1.0,
     xi=0.01,
     num_samples=100,  # how many random points to sample each iteration
-    kernel_type='Matern',
+    kernel_type='RBF',
     nu=2.5,
     X_init=None,  # optional pre-loaded data
     y_init=None,
@@ -249,8 +273,8 @@ def gp_random_optimizer(
 # 8. Top-level "my_algorithm"
 #    (Random Search + GP Random Optimizer)
 # -------------------------------
-def my_algorithm(f, x_dim, bounds, iter_tot,
-                 kernel_type='Matern', nu=2.5):
+def opt_GP(f, x_dim, bounds, iter_tot,
+                 kernel_type='RBF', nu=2.5):
     """
     1) Uses random search for part of the budget.
     2) Then uses a GP-based random acquisition approach (EI),
@@ -259,18 +283,12 @@ def my_algorithm(f, x_dim, bounds, iter_tot,
     bounds = np.array(bounds)
     # Decide how many evaluations for random search
     n_rs = int(min(100, max(iter_tot*0.05, 5)))  # e.g., 5% of total, at least 5, up to 100
-    if n_rs >= iter_tot:
-        # Edge case: if iter_tot is small, do only random search
-        n_rs = iter_tot
+    
 
     # 1) Random search
     x_best_rs, f_best_rs, X_rs, Y_rs = Random_search(
         f, x_dim, bounds, n_rs
     )
-
-    # 2) Prepare warm start for GP
-    X_init = X_rs
-    y_init = Y_rs
 
     # 3) Remaining budget for GP
     gp_iters = iter_tot - n_rs
@@ -286,16 +304,16 @@ def my_algorithm(f, x_dim, bounds, iter_tot,
         bounds      = bounds,
         n_iters     = gp_iters,
         n_pre_samples = 0,        # we already have data
-        alpha       = 1e-8,
-        length_scale= 1,
+        alpha       = 1e-5,
+        length_scale= 0.5,
         xi          = 0.01,
-        num_samples = 1000,
+        num_samples = 90,
         kernel_type = kernel_type,
         nu          = nu,
-        X_init      = X_init,
-        y_init      = y_init
+        X_init      = X_rs,
+        y_init      = Y_rs
     )
 
     team_names = ["7", "8"]
     cids = ["01234567"]
-return x_opt, f_opt, team_names, cids
+    return x_opt, f_opt, team_names, cids
