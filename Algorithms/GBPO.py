@@ -1,42 +1,45 @@
 import numpy as np
-import math
 
-# --------------------------------
-# Kernel Functions
-# --------------------------------
+
+# -------------------------------
+# 1. Kernel Functions
+# -------------------------------
 def rbf_kernel(X1, X2, length_scale):
     """
     Radial Basis Function (RBF) kernel.
     """
     X1 = np.atleast_2d(X1)
     X2 = np.atleast_2d(X2)
-    sqdist = np.sum((X1[:, np.newaxis, :] - X2[np.newaxis, :, :]) ** 2, axis=2)
+    sqdist = np.sum((X1[:, np.newaxis, :] - X2[np.newaxis, :, :])**2, axis=2)
     return np.exp(-0.5 / (length_scale**2) * sqdist)
 
 def matern_kernel(X1, X2, length_scale, nu=2.5):
     """
-    Matérn kernel. Supports nu = 1.5 (less smooth) or nu = 2.5 (smoother).
+    Matérn kernel. Supports nu=1.5 or nu=2.5.
     """
     X1 = np.atleast_2d(X1)
     X2 = np.atleast_2d(X2)
-    dist = np.sqrt(np.sum((X1[:, np.newaxis, :] - X2[np.newaxis, :, :]) ** 2, axis=2))
+    dist = np.sqrt(np.sum((X1[:, np.newaxis, :] - X2[np.newaxis, :, :])**2, axis=2))
     
     if nu == 1.5:
-        scale = 1.0 + (np.sqrt(3) * dist) / length_scale
-        return scale * np.exp(-np.sqrt(3) * dist / length_scale)
+        scale = 1.0 + (np.sqrt(3) * dist)/length_scale
+        return scale * np.exp(-np.sqrt(3)*dist / length_scale)
     elif nu == 2.5:
-        scale = 1.0 + (np.sqrt(5) * dist) / length_scale + (5 * dist**2) / (3 * length_scale**2)
-        return scale * np.exp(-np.sqrt(5) * dist / length_scale)
+        scale = 1.0 + (np.sqrt(5) * dist)/length_scale + (5*dist**2)/(3*(length_scale**2))
+        return scale * np.exp(-np.sqrt(5)*dist / length_scale)
     else:
         raise ValueError("Unsupported nu value. Use nu=1.5 or nu=2.5.")
 
-
-# Standard Normal PDF
+# -------------------------------
+# 2. Standard Normal PDF/CDF
+# -------------------------------
 def standard_normal_pdf(z):
-    return (1.0 / np.sqrt(2 * np.pi)) * np.exp(-0.5 * z ** 2)
+    return (1.0 / np.sqrt(2.0 * np.pi)) * np.exp(-0.5 * z**2)
 
-# Error Function Approximation
 def erf(z):
+    """
+    Approximation of the error function.
+    """
     a1 = 0.254829592
     a2 = -0.284496736
     a3 = 1.421413741
@@ -47,204 +50,251 @@ def erf(z):
     sign = np.sign(z)
     z = np.abs(z)
     
-    t = 1.0 / (1.0 + p * z)
-    y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * np.exp(-z * z)
+    t = 1.0 / (1.0 + p*z)
+    y = 1.0 - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t * np.exp(-z*z)
     return sign * y
 
-# Standard Normal CDF
 def standard_normal_cdf(z):
-    return 0.5 * (1 + erf(z / np.sqrt(2)))
+    return 0.5 * (1 + erf(z / np.sqrt(2.0)))
 
-# --------------------------------
-# GP Posterior with Kernel Selection
-# --------------------------------
-def gp_posterior(X_train, y_train, X_test, alpha, length_scale, kernel_type='Matern', nu=2.5):
+# -------------------------------
+# 3. GP Posterior
+# -------------------------------
+def gp_posterior(X_train, y_train, X_test,
+                 alpha, length_scale, kernel_type='Matern', nu=2.5):
     """
-    Gaussian Process posterior using a selected kernel.
+    Gaussian Process posterior using a chosen kernel (RBF or Matern).
     """
     if kernel_type == 'RBF':
         kernel = rbf_kernel
     elif kernel_type == 'Matern':
-        kernel = lambda X1, X2, l: matern_kernel(X1, X2, l, nu=nu)
+        kernel = lambda A, B, l: matern_kernel(A, B, l, nu=nu)
     else:
-        raise ValueError("Invalid kernel_type. Use 'RBF' or 'Matern'.")
+        raise ValueError("kernel_type must be 'RBF' or 'Matern'.")
 
-    # Kernel computations
-    K = kernel(X_train, X_train, length_scale) + alpha**2 * np.eye(len(X_train))
-    K_s = kernel(X_train, X_test, length_scale)
-    K_ss = kernel(X_test, X_test, length_scale) + alpha**2 * np.eye(len(X_test))
-    
-    # Jitter for numerical stability
-    K += 1e-8 * np.eye(len(K))
-    
-    # Solve for alpha_vec in K * alpha_vec = y
-    L = np.linalg.cholesky(K)
+    # Build the covariance matrices
+    K    = kernel(X_train, X_train, length_scale) + alpha**2 * np.eye(len(X_train))
+    K_s  = kernel(X_train, X_test,  length_scale)
+    K_ss = kernel(X_test,  X_test,  length_scale) + alpha**2 * np.eye(len(X_test))
+
+    # Add small jitter for numerical stability
+    K += 1e-9 * np.eye(len(K))
+
+    # Solve for alpha_vec
+    L         = np.linalg.cholesky(K)
     alpha_vec = np.linalg.solve(L.T, np.linalg.solve(L, y_train))
+
+    # Mean
+    mu_s = K_s.T.dot(alpha_vec)  # shape (len(X_test),)
     
-    # Posterior mean & covariance
-    mu_s = K_s.T.dot(alpha_vec)              # shape (n_test,)
-    v    = np.linalg.solve(L, K_s)          # shape (n_train, n_test)
-    cov_s = K_ss - v.T.dot(v)               # shape (n_test, n_test)
-    
+    # Covariance
+    v     = np.linalg.solve(L, K_s)        # shape (n_train, n_test)
+    cov_s = K_ss - v.T.dot(v)              # shape (n_test, n_test)
+
     return mu_s.flatten(), cov_s
 
-# Expected Improvement Function
+# -------------------------------
+# 4. Expected Improvement
+# -------------------------------
 def expected_improvement(X, X_train, y_train, mu, sigma, f_best, xi):
-    sigma = np.maximum(sigma, 1e-8)
+    """
+    EI for minimization problem with best value 'f_best'.
+    """
+    sigma = np.maximum(sigma, 1e-12)
     Z = (mu - f_best - xi) / sigma
     phi = standard_normal_pdf(Z)
     Phi = standard_normal_cdf(Z)
-    ei = (mu - f_best - xi) * Phi + sigma * phi
+    ei = (mu - f_best - xi)*Phi + sigma*phi
     return ei
 
-def initialize_trust_region(bounds, initial_radius):
-    trust_region_center = None
-    trust_region_radius = initial_radius
-    return trust_region_center, trust_region_radius
-
-def update_trust_region(trust_region_center, trust_region_radius, X_new, y_new, y_best, bounds, shrink_factor, expand_factor):
-    # If new sample is better than best so far, expand; otherwise, shrink
-    if y_new < y_best:
-        trust_region_radius *= expand_factor
-    else:
-        trust_region_radius *= shrink_factor
-
-    # Ensure the radius stays within bounds
-    min_radius = 0.01 * np.ptp(bounds, axis=1)
-    max_radius = 0.5 * np.ptp(bounds, axis=1)
-    trust_region_radius = np.maximum(np.minimum(trust_region_radius, max_radius), min_radius)
-
-    # Update the center to the new point
-    trust_region_center = X_new
-    return trust_region_center, trust_region_radius
-
-def random_acquisition_maximization(acquisition, X_train, y_train, trust_region_center, trust_region_radius, 
-                                    bounds, num_samples, alpha, length_scale, xi):
-    # Generate random samples within the trust region
-    lower_bounds = np.maximum(trust_region_center - trust_region_radius, bounds[:, 0])
-    upper_bounds = np.minimum(trust_region_center + trust_region_radius, bounds[:, 1])
-    samples = np.random.uniform(lower_bounds, upper_bounds, size=(num_samples, bounds.shape[0]))
-    
-    # Compute GP posterior for samples
-    mu, cov = gp_posterior(X_train, y_train, samples, alpha=alpha, length_scale=length_scale)
-    sigma = np.sqrt(np.diag(cov))
-    f_best = np.min(y_train)  # Minimization problem
-    
-    # Compute acquisition values
-    acquisition_values = np.array([
-        acquisition(x.reshape(1, -1), X_train, y_train, mu_i, sigma_i, f_best, xi)
-        for x, mu_i, sigma_i in zip(samples, mu, sigma)
-    ])
-    
-    # Select the point with the highest acquisition value
-    idx_max = np.argmax(acquisition_values)
-    X_next = samples[idx_max]
-    return X_next
-    
-# --------------------------------
-# GP Trust Region Optimizer
-# --------------------------------
-def gp_trust_optimizer(
-    sample_loss,        # callable: given x -> f(x)
-    bounds,             # array shape (d, 2)conda activate
-    n_iters=99,         # how many iterations
-    n_pre_samples=2,    # random initial points
-    alpha=1e-8,          # noise term
-    initial_trust_radius=1,
-    length_scale=2,
-    xi=0.1,            # EI exploration param
-    shrink_factor=0.8,
-    expand_factor=1.3,
-    num_samples=1000,
-    kernel_type='Matern',  # Kernel selection ('RBF' or 'Matern')
-    nu=2.5              # For Matérn kernel, specifies smoothness
+# -------------------------------
+# 5. Global Acquisition Maximization
+#    (No Trust Region)
+# -------------------------------
+def random_acquisition_global(
+    acquisition,
+    X_train, y_train,
+    bounds,
+    num_samples,
+    alpha,
+    length_scale,
+    xi,
+    kernel_type='Matern',
+    nu=2.5
 ):
     """
-    Minimizes sample_loss over 'bounds' using GP + trust region + random acquisition maximization.
-    Returns: (best_x, best_f)
+    1) Generate 'num_samples' random points across the entire domain.
+    2) Compute GP posterior -> mean, variance at those points.
+    3) Evaluate the acquisition (EI) at each point.
+    4) Return the point with the highest acquisition.
+    """
+    d = bounds.shape[0]
+    # Sample uniformly in [lb, ub] for each dim
+    random_points = np.zeros((num_samples, d))
+    for i in range(d):
+        lb, ub = bounds[i]
+        random_points[:, i] = np.random.rand(num_samples)*(ub - lb) + lb
+
+    # Posterior
+    mu, cov = gp_posterior(X_train, y_train, random_points,
+                           alpha=alpha, length_scale=length_scale,
+                           kernel_type=kernel_type, nu=nu)
+    sigma = np.sqrt(np.diag(cov))
+    f_best = np.min(y_train)  # Minimization
+
+    # EI at each random point
+    acq_values = np.array([
+        acquisition(x.reshape(1, -1),
+                    X_train, y_train,
+                    mu_i, sigma_i,
+                    f_best, xi)
+        for x, mu_i, sigma_i in zip(random_points, mu, sigma)
+    ])
+    
+    # Pick best
+    idx_best = np.argmax(acq_values)
+    return random_points[idx_best]
+
+# -------------------------------
+# 6. Simple Random Search
+# -------------------------------
+def Random_search(f, n_dim, bounds_rs, n_samples):
+    """
+    Randomly sample 'n_samples' points in 'bounds_rs'.
+    Returns best solution + all sampled points.
+    """
+    X_sampled = np.zeros((n_samples, n_dim))
+    Y_vals = np.zeros(n_samples)
+
+    dom_range = bounds_rs[:, 1] - bounds_rs[:, 0]
+    dom_bias  = bounds_rs[:, 0]
+
+    for i in range(n_samples):
+        x_rand = np.random.rand(n_dim)*dom_range + dom_bias
+        X_sampled[i] = x_rand
+        Y_vals[i] = f.fun_test(x_rand)
+
+    idx_min = np.argmin(Y_vals)
+    x_best  = X_sampled[idx_min]
+    f_best  = Y_vals[idx_min]
+    return x_best, f_best, X_sampled, Y_vals
+
+# -------------------------------
+# 7. GP + Global Random Acquisition Optimizer
+# -------------------------------
+def gp_random_optimizer(
+    sample_loss,  
+    bounds,       
+    n_iters=50,    
+    n_pre_samples=2,
+    alpha=1e-8,
+    length_scale=1.0,
+    xi=0.01,
+    num_samples=100,  # how many random points to sample each iteration
+    kernel_type='Matern',
+    nu=2.5,
+    X_init=None,  # optional pre-loaded data
+    y_init=None,
+):
+    """
+    Minimizes sample_loss over 'bounds' using:
+    - Gaussian Process
+    - Expected Improvement
+    - 'random_acquisition_global' across entire domain
     """
     bounds = np.array(bounds)
     d = bounds.shape[0]
 
-    # 1) Initial random points
-    X_train = np.random.uniform(bounds[:, 0], bounds[:, 1], size=(n_pre_samples, d))
-    y_train = np.array([sample_loss(x) for x in X_train])
-    
-    # 2) Find the best among these initial samples
-    best_idx = np.argmin(y_train)
-    y_best = y_train[best_idx]
-    trust_region_center = X_train[best_idx]
-    trust_region_radius = initial_trust_radius * np.ptp(bounds, axis=1)  # vector, same dimension
-    
+    # 1) Initialize data
+    if X_init is not None and y_init is not None:
+        X_train = X_init
+        y_train = y_init
+    else:
+        # random initial points
+        X_train = np.zeros((n_pre_samples, d))
+        y_train = np.zeros(n_pre_samples)
+        for i in range(n_pre_samples):
+            x_rand = np.random.rand(d)*(bounds[:,1] - bounds[:,0]) + bounds[:,0]
+            X_train[i] = x_rand
+            y_train[i] = sample_loss(x_rand)
+
+    # 2) Main loop
     for i in range(n_iters):
-        # Acquire next sample
-        X_next = random_acquisition_maximization(
-            acquisition=expected_improvement,
-            X_train=X_train, 
-            y_train=y_train,
-            trust_region_center=trust_region_center,
-            trust_region_radius=trust_region_radius,
-            bounds=bounds,
-            num_samples=num_samples,
-            alpha=alpha,
-            length_scale=length_scale,
-            xi=xi
+        # Acquire next sample by sampling the entire domain
+        X_next = random_acquisition_global(
+            acquisition = expected_improvement,
+            X_train = X_train,
+            y_train = y_train,
+            bounds  = bounds,
+            num_samples = num_samples,
+            alpha   = alpha,
+            length_scale = length_scale,
+            xi      = xi,
+            kernel_type = kernel_type,
+            nu      = nu
         )
-        
-        # Evaluate at X_next
         y_next = sample_loss(X_next)
-        
-        # Update training set
-        X_train = np.vstack((X_train, X_next))
+
+        # Update dataset
+        X_train = np.vstack([X_train, X_next])
         y_train = np.append(y_train, y_next)
-        
-        # Update best
-        y_best=np.min(y_train)
-        
-        # Update trust region
-        trust_region_center, trust_region_radius = update_trust_region(
-            trust_region_center, 
-            trust_region_radius, 
-            X_next, 
-            y_next, 
-            y_best, 
-            bounds, 
-            shrink_factor, 
-            expand_factor
-        )
-        
-    # Return the best found
-    best_idx_final = np.argmin(y_train)
-    best_x = X_train[best_idx_final]
-    best_f = y_train[best_idx_final]
-    
+
+    # 3) Return best
+    best_idx = np.argmin(y_train)
+    best_x = X_train[best_idx]
+    best_f = y_train[best_idx]
     return best_x, best_f
 
-# --------------------------------
-# My Algorithm
-# --------------------------------
-def my_algorithm(f, x_dim, bounds, iter_tot, kernel_type='Matern', nu=2.5):
+# -------------------------------
+# 8. Top-level "my_algorithm"
+#    (Random Search + GP Random Optimizer)
+# -------------------------------
+def my_algorithm(f, x_dim, bounds, iter_tot,
+                 kernel_type='Matern', nu=2.5):
     """
-    Optimizer using GP + trust region with selectable kernel type.
+    1) Uses random search for part of the budget.
+    2) Then uses a GP-based random acquisition approach (EI),
+       sampling across the entire domain (no trust region).
     """
+    bounds = np.array(bounds)
+    # Decide how many evaluations for random search
+    n_rs = int(min(100, max(iter_tot*0.05, 5)))  # e.g., 5% of total, at least 5, up to 100
+    if n_rs >= iter_tot:
+        # Edge case: if iter_tot is small, do only random search
+        n_rs = iter_tot
+
+    # 1) Random search
+    x_best_rs, f_best_rs, X_rs, Y_rs = Random_search(
+        f, x_dim, bounds, n_rs
+    )
+
+    # 2) Prepare warm start for GP
+    X_init = X_rs
+    y_init = Y_rs
+
+    # 3) Remaining budget for GP
+    gp_iters = iter_tot - n_rs
+    if gp_iters < 0:
+        gp_iters = 0
+
+    # We'll define sample_loss as:
     sample_loss = lambda x: f.fun_test(x)
 
-    x_opt, f_opt = gp_trust_optimizer(
-        sample_loss=sample_loss,
-        bounds=bounds,
-        n_iters=iter_tot,
-        n_pre_samples=2,
-        alpha=1e-8,
-        initial_trust_radius=5,
-        length_scale=0.5,
-        xi=0.01,
-        shrink_factor=0.8,
-        expand_factor=1.3,
-        num_samples=100000,
-        kernel_type=kernel_type,  # Select kernel type
-        nu=nu                    # Matérn smoothness parameter
+    # 4) Run GP random optimizer
+    x_opt, f_opt = gp_random_optimizer(
+        sample_loss = sample_loss,
+        bounds      = bounds,
+        n_iters     = gp_iters,
+        n_pre_samples = 0,        # we already have data
+        alpha       = 1e-8,
+        length_scale= 1,
+        xi          = 0.01,
+        num_samples = 1000,
+        kernel_type = kernel_type,
+        nu          = nu,
+        X_init      = X_init,
+        y_init      = y_init
     )
 
     team_names = ["7", "8"]
     cids = ["01234567"]
-    return x_opt, f_opt, team_names, cids
