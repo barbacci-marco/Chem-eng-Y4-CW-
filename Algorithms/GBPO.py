@@ -298,3 +298,4 @@ def my_algorithm(f, x_dim, bounds, iter_tot,
 
     team_names = ["7", "8"]
     cids = ["01234567"]
+return x_opt, f_opt, team_names, cids
