@@ -270,8 +270,7 @@ def gp_random_optimizer(
     return best_x, best_f
 
 # -------------------------------
-# 8. Top-level "my_algorithm"
-#    (Random Search + GP Random Optimizer)
+# 8. Wrapper Function
 # -------------------------------
 def opt_GP(f, x_dim, bounds, iter_tot,
                  kernel_type='RBF', nu=2.5):
@@ -303,7 +302,7 @@ def opt_GP(f, x_dim, bounds, iter_tot,
         sample_loss = sample_loss,
         bounds      = bounds,
         n_iters     = gp_iters,
-        n_pre_samples = 0,        # we already have data
+        n_pre_samples = 0,       
         alpha       = 1e-10,
         length_scale= 0.5,
         xi          = 0.1,
