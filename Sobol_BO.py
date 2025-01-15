@@ -37,10 +37,7 @@ def bayesian_optimization_wrapper2(
     beta=2.0,
     device="cpu"
 ):
-    """
-    Perform Bayesian Optimization using BoTorch on a function `f` that
-    has a .fun_test(x: np.array) -> float method, with Sobol-based init.
-
+    """"
     Parameters
     ----------
     f : object
@@ -70,7 +67,7 @@ def bayesian_optimization_wrapper2(
     bounds_np = np.array(bounds, dtype=float)
     assert bounds_np.shape == (xdim, 2), f"Bounds must be (xdim,2), got {bounds_np.shape}"
 
-    # We'll do [lb, ub] so the shape is (2, xdim)
+    # [lb, ub] so the shape is (2, xdim)
     bounds_torch = torch.tensor(bounds_np.T, dtype=torch.float32, device=device)
 
     # 2) Sobol initialization in [0,1]^xdim, then scale to [lb_i, ub_i]
@@ -81,19 +78,19 @@ def bayesian_optimization_wrapper2(
     upper = bounds_torch[1]
     widths = upper - lower   # shape (xdim,)
 
-    # Map [0,1]^xdim -> [lower, upper]
+    
     X_list = []
     y_list = []
 
     def evaluate_fun(x_np: np.ndarray) -> float:
-        # f.fun_test expects np.ndarray, not a torch.Tensor
+        
         return f.fun_test(x_np)  # returns float
 
-    # Evaluate the initial Sobol points
+    # Evaluating the initial Sobol points
     for i in range(n_init):
-        # sobol_samples[i] is a row in [0,1]
+       
         x_scaled = lower + widths * sobol_samples[i]
-        # Convert to NumPy for your function
+        # Convert to NumPy for objective function
         x_np = x_scaled.detach().cpu().numpy()
         y_val = evaluate_fun(x_np)
         X_list.append(x_scaled.view(1, -1))  # shape (1, xdim)
@@ -107,7 +104,7 @@ def bayesian_optimization_wrapper2(
         # Build & train GP
         model = SingleTaskGP(X_train, y_train)
 
-        # Example init hyperparams (only if your model has these attributes):
+        
         if hasattr(model.covar_module, "initialize"):
             # If it's an RBFKernel, you can set lengthscale:
             model.covar_module.initialize(lengthscale=1.0)
@@ -117,7 +114,7 @@ def bayesian_optimization_wrapper2(
         mll = ExactMarginalLogLikelihood(model.likelihood, model)
         fit_gpytorch_model(mll, lr=0.001)
 
-        # Define UCB acquisition function
+        # UCB acquisition function
         UCB = UpperConfidenceBound(model=model, beta=beta)
 
         # Optimize acquisition in [lower, upper]
@@ -139,13 +136,11 @@ def bayesian_optimization_wrapper2(
             [y_train, torch.tensor([[y_new_val]], dtype=torch.float32, device=device)],
             dim=0
         )
-        
-
-    # 4) Best point so far (minimization)
+    #Best point
     best_val, best_idx = y_train.min(dim=0)
     best_point = X_train[best_idx]
 
-    # Example metadata
+    
     team_names = ["7", "8"]
     cids = ["01234567"]
 
