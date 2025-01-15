@@ -97,11 +97,11 @@ def bayesian_optimization_wrapper(
         # Fit GP
         model = SingleTaskGP(X_train, y_train)
         
-        # If model.covar_module is RBFKernel, call .initialize(lengthscale=...)
+       
         model.covar_module.initialize(lengthscale=1.0)
         
         # Noise
-        model.likelihood.noise_covar.initialize(noise=1e-2)
+        model.likelihood.noise_covar.initialize(noise=1e-6)
         
         mll = ExactMarginalLogLikelihood(model.likelihood, model)
         fit_gpytorch_model(mll, lr=0.001)
